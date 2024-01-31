@@ -1,0 +1,9 @@
+langchain
+langchain_community
+langchain_core
+langchainhub
+transformers
+pypdf
+openai
+chromadb
+tiktoken
