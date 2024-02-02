@@ -1,3 +1,7 @@
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -7,9 +11,11 @@ from langchain_openai.chat_models import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain import hub
+from langchain_community.document_loaders import WebBaseLoader
 import streamlit as st
 import tempfile
 import os
+import bs4
 
 # load env
 load_dotenv()
@@ -24,12 +30,15 @@ def pdf_to_document(uploaded_file):
     pages = loader.load_and_split()
     return pages
 
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
 # title
 st.title("ChatPDF")
 st.write("---")
 
 # upload file
-uploaded_file = st.file_uploader("Choose a file")
+uploaded_file = st.file_uploader("Choose a pdf file", type=['pdf'])
 st.write("---")
 
 if uploaded_file is not None:
@@ -51,6 +60,18 @@ if uploaded_file is not None:
     # save data to Chroma
     vectorstore = Chroma.from_documents(texts, embeddings)
 
+    # Load, chunk and index the contents of the blog.
+    loader = WebBaseLoader(
+        web_paths=("http://wiki.hash.kr/index.php/%EA%B9%80%ED%98%95%EC%A7%84",),
+        bs_kwargs=dict(
+            parse_only=bs4.SoupStrainer(
+                class_=("post-content", "post-title", "post-header")
+            )
+        ),
+    )
+    docs = loader.load()
+    splits = text_splitter.split_documents(docs)
+
     # make a question
     st.header("PDF에게 질문하세요.")
     question = st.text_input("질문을 입력 하세요")
@@ -66,7 +87,7 @@ if uploaded_file is not None:
             retriever = vectorstore.as_retriever()
             prompt = hub.pull("rlm/rag-prompt")
             rag_chain = (
-                    {"context": retriever, "question": RunnablePassthrough()}
+                    {"context": retriever | format_docs, "question": RunnablePassthrough()}
                     | prompt
                     | llm
                     | StrOutputParser()
